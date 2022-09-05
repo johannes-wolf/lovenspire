@@ -2,6 +2,7 @@ if os.getenv("LOCAL_LUA_DEBUGGER_VSCODE") == "1" then
     require("lldebugger").start()
 end
 
+local utf8 = require 'utf8'
 local class = require 'class'
 _G.class = class
 
@@ -17,19 +18,19 @@ local touch = {}
 --_G.touch = touch
 
 function touch.ppi()
-  return 1
+  return 20
 end
 
 function touch.xppi()
-  return 1
+  return 20
 end
 
 function touch.yppi()
-  return 1
+  return 20
 end
 
-function touch.enable()
-  return nil
+function touch.enabled()
+  return true
 end
 
 function touch.isKeyboardAvailable()
@@ -127,34 +128,16 @@ end
 local on = {}
 _G.on = on
 
-function on.construction()
-end
-
-function on.restore(state)
-end
-
-function on.save()
-end
-
-function on.resize(w, h)
-end
-
-function on.activate()
-end
-
-function on.getFocus()
-end
-
-function on.create()
-end
-
 function on.paint(gc)
+  love.graphics.print('Nothing', 0, 0)
 end
 
+local window = class()
 local platform = {
   apiLevel = 2,
-  window = {}
+  window = window()
 }
+
 _G.platform = platform
 
 function platform.hw()
@@ -235,31 +218,68 @@ function image:height()
   return 0
 end
 
-function string:split(str, delim)
+function string.split(str, delim)
+  delim = delim or '%s'
+  local t = {}
+  for field, s in string.gmatch(str, "([^"..delim.."]*)("..delim.."?)") do
+    table.insert(t, field)
+    if s == "" then
+      return t
+    end
+  end
 end
 
-function string:uchar(n, ...)
-  return ""
+function string.uchar(...)
+  return utf8.char(...)
 end
 
-function string:usub(i, j)
-  return self:sub(i, j)
+function string.usub(str, i, j)
+  i = i or 1
+  j = j or -1
+  return str:sub(i, j)
+  --return str:sub(utf8.offset(str, i), utf8.offset(str, j)) -- FIXME: does not work!
 end
 
-function string:ulen()
-  return self:len()
+function string.ulen(str)
+  return utf8.len(str)
 end
 
-local var = {}
+local timer = class()
+_G.timer = timer
+
+function timer.getMilliSecCounter()
+  return love.timer.getTime() * 1000
+end
+
+function timer.start(period)
+  timer.period = period / 1000.0
+end
+
+function timer.stop()
+  timer.period = nil
+end
+
+local var = {
+  vars = {}
+}
 _G.var = var
 
 function var.list()
-  return var.vars or {}
+  local t = {}
+  for key, _ in pairs(var.vars) do
+    table.insert(t, key)
+  end
+  return t
 end
+
+function var.store(ident, value)
+  var.vars[ident] = value
+end
+
 -- TBC...
 
 gc.font_cache = {}
-gc.size_factor = 4
+gc.font_size_factor = 1
 
 function gc:init()
   self:setFont(nil, nil, 11)
@@ -288,7 +308,7 @@ function gc:drawArc(x, y, w, h, sa, se)
 end
 
 function gc:drawImage(handle, x, y)
-  assert(nil)
+  --assert(nil)
 end
 
 function gc:drawLine(x1, y1, x2, y2)
@@ -344,16 +364,20 @@ function gc:setFont(family, style, size)
   family = family or 'sansserif'
   style = style or 'r'
   size = size or 11
-  size = size * gc.size_factor
+  size = size * gc.font_size_factor
 
   if not gc.font_cache[family..style..size] then
-    print('Loading font')
+    print('Loading font '..family..' '..style..' '..size)
     gc.font_cache[family..style..size] = assert(love.graphics.newFont("NotoSans-Regular.ttf", size))
   end
 
+  local prev_font = self.current_font or {family, style, size}
   if gc.font_cache[family..style..size] then
     love.graphics.setFont(gc.font_cache[family..style..size])
+    gc.current_font = {family, style, size}
   end
+
+  return table.unpack(prev_font)
 end
 
 function gc:setPen(thickness, style)
@@ -366,6 +390,7 @@ end
 
 -- Love Implementation
 local main_gc = nil
+local is_grabbing = false
 local filename = nil
 
 local function load_app(filename)
@@ -376,6 +401,26 @@ local function load_app(filename)
   end
 end
 
+local function app_on(event, ...)
+  if event ~= 'paint' then
+    print('[event] '..event)
+  end
+  if on and on[event] then
+    return on[event](...)
+  end
+end
+
+local function app_init()
+  app_on('construction')
+  --app_on('restore', nil)
+  app_on('resize', love.graphics.getPixelWidth(), love.graphics.getPixelHeight())
+  app_on('activate')
+  app_on('getFocus')
+  app_on('create')
+
+  main_gc = gc()
+end
+
 function love.load()
   love.window.setMode(1600, 900, {resizable = true})
 
@@ -384,32 +429,60 @@ function love.load()
   load_app(filename)
 
   print('[init]')
-  print('construction...')
-  on.construction()
-  print('restore...')
-  on.restore(nil)
-  print('resize...')
-  on.resize(love.graphics.getPixelWidth(), love.graphics.getPixelHeight())
-  print('activate...')
-  on.activate()
-  print('getFocus...')
-  on.getFocus()
-  print('create...')
-  on.create()
-  print('[done]')
-
-  main_gc = gc()
+  app_init()
 end
 
 function love.resize(w, h)
-  on.resize(w, h)
+  app_on('resize', w, h)
 end
 
 function love.update()
+  if timer.period then
+    if (timer.next_tick or 0) < love.timer.getTime() then
+      app_on('timer')
+      if timer.period then
+        timer.next_tick = love.timer.getTime() + timer.period
+      end
+    end
+  end
 end
 
 function love.draw()
-  on.paint(main_gc, 0, 0, love.graphics.getPixelWidth(), love.graphics.getPixelHeight())
+  if on.paint then
+    on.paint(main_gc, 0, 0, love.graphics.getPixelWidth(), love.graphics.getPixelHeight())
+  end
+end
+
+function love.mousemoved(x, y, dx, dy, istouch)
+  app_on('mouseMove', x, y)
+end
+
+function love.mousepressed(x, y, button, istouch, presses)
+  local ctrl = love.keyboard.isDown('lctrl') or love.keyboard.isDown('rctrl')
+
+  if button == 1 then
+    if ctrl then
+      is_grabbing = true
+      app_on('grabDown', 0, 0)
+    end
+    app_on('mouseDown', x, y)
+  elseif button == 2 then
+    app_on('rightMouseDown', x, y)
+  end
+end
+
+function love.mousereleased(x, y, button, istouch, presses)
+  if button == 1 then
+    if is_grabbing then
+      app_on('grabUp', 0, 0)
+    else
+      app_on('mouseUp', x, y)
+    end
+  elseif button == 2 then
+    app_on('rightMouseUp', x, y)
+  end
+
+  is_grabbing = false
 end
 
 function love.keypressed(key, scancode, isrepeat)
@@ -417,47 +490,77 @@ function love.keypressed(key, scancode, isrepeat)
   local ctrl = love.keyboard.isDown('lctrl') or love.keyboard.isDown('rctrl')
 
   if key == 'up' then
-    on.arrowUp()
+    if on.arrowUp then
+      app_on('arrowUp')
+    else
+      app_on('arrowKey', 'up')
+    end
   elseif key == 'down' then
-    on.arrowDown()
+    if on.arrowDown then
+      app_on('arrowDown')
+    else
+      app_on('arrowKey', 'down')
+    end
   elseif key == 'left' then
-    on.arrowLeft()
+    if on.arrowLeft then
+      app_on('arrowLeft')
+    else
+      app_on('arrowKey', 'left')
+    end
   elseif key == 'right' then
-    on.arrowRight()
+    if on.arrowRight then
+      app_on('arrowRight')
+    else
+      app_on('arrowKey', 'right')
+    end
   elseif key == 'return' then
     if shift then
-      on.returnKey()
+      app_on('returnKey')
     else
-      on.enterKey()
+      app_on('enterKey')
     end
   elseif key == 'backspace' then
-    on.backspaceKey()
+    if ctrl then
+      app_on('clearKey')
+    else
+      app_on('backspaceKey')
+    end
   elseif key == 'escape' then
-    on.escapeKey()
+    app_on('escapeKey')
   elseif key == 'tab' then
     if shift then
-      on.backtabKey()
+      app_on('backtabKey')
     else
-      on.tabKey()
+      app_on('tabKey')
     end
-  elseif key == '-' and shift then
-    on.charIn('\226\136\146')
+  elseif key == '-' and ctrl then
+    app_on('charIn', '\226\136\146') -- BUG!!
   else
     if love.keyboard.isDown('lctrl') or love.keyboard.isDown('rctrl') then
       if key == 'r' then
+        --on = {}
         load_app(filename)
+        app_init()
+        main_gc = gc()
       elseif key == 'c' then
-        on.copy()
+        app_on('copy')
       elseif key == 'x' then
-        on.cut()
+        app_on('cut')
       elseif key == 'v' then
-        on.paste()
+        app_on('paste')
       elseif key == 'm' then
-        on.menu()
-      elseif key == '.' then
-        on.contextMenu()
-      elseif key == '.' then
-        on.clearKey()
+        app_on('contextMenu')
+      elseif key == 'k' then
+        app_on('clearKey')
+      elseif key == '1' then
+        gc.font_size_factor = 1
+        main_gc = gc()
+      elseif key == '2' then
+        gc.font_size_factor = 2
+        main_gc = gc()
+      elseif key == '3' then
+        gc.font_size_factor = 4
+        main_gc = gc()
       end
     end
   end
