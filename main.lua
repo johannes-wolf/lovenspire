@@ -233,11 +233,9 @@ function string.uchar(...)
   return utf8.char(...)
 end
 
-function string.usub(str, i, j)
-  i = i or 1
-  j = j or -1
-  return str:sub(i, j)
-  --return str:sub(utf8.offset(str, i), utf8.offset(str, j)) -- FIXME: does not work!
+function string.usub(s, i, j)
+   if j and j <= 0 then return '' end
+   return string.sub(s, i and utf8.offset(s, i) or 1, j and (utf8.offset(s, j+1) - 1))
 end
 
 function string.ulen(str)
@@ -283,6 +281,10 @@ gc.font_size_factor = 1
 
 function gc:init()
   self:setFont(nil, nil, 11)
+end
+
+function gc:smartClipRect(op, x, y, w, h)
+	return self:clipRect(op, x, y, w, h)
 end
 
 function gc:clipRect(op, x, y, w, h)
@@ -380,11 +382,15 @@ function gc:setFont(family, style, size)
   return table.unpack(prev_font)
 end
 
-function gc:setPen(thickness, style)
-  thickness = thickness or 'thin'
-  style = style or 'smooth'
+function gc:setLineWidth(thickness)
+	return self:setPen(thickness, self.style or 'smooth')
+end
 
-  love.setLineWidth(thickness == 'thin' and 1 or (thickness == 'medium' and 2 or (thickness 'thick' and 3)))
+function gc:setPen(thickness, style)
+  self.thickness = thickness or 'thin'
+  self.style = style or 'smooth'
+
+  love.graphics.setLineWidth(thickness == 'thin' and 1 or (thickness == 'medium' and 2 or (thickness 'thick' and 3)))
 end
 
 
